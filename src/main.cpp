@@ -13,11 +13,12 @@
 #define SCALING_FACTOR (17.5f * 0.017453292519943295769236907684886f / 1000.0f);
 #define LEG_LENGTH (0.95)
 #define FILTER_COEFFICIENT 0.1f
+#define THRESHOLD (3750)
 
 SPI spi(PF_9, PF_8, PF_7, PC_1, use_gpio_ssel);
-uint8_t write_buf[32];
-uint8_t read_buf[32];
-float data_buf[40];
+int8_t write_buf[32];
+int8_t read_buf[32];
+int16_t data_buf[40];
 Ticker t;
 DigitalIn button(PA_0);
 EventFlags flags;
@@ -103,40 +104,49 @@ int main()
         raw_gy = (((uint16_t)read_buf[4]) << 8) | ((uint16_t)read_buf[3]);
         raw_gz = (((uint16_t)read_buf[6]) << 8) | ((uint16_t)read_buf[5]);
 
-        gx = ((float)raw_gx) * SCALING_FACTOR;
-        gy = ((float)raw_gy) * SCALING_FACTOR;
-        gz = ((float)raw_gz) * SCALING_FACTOR;
+        printf("RAW|\tgx: %d \t gy: %d \t gz: %d\t\n", raw_gx, raw_gy, raw_gz);
 
-        // Applying low pass filter to reduce noise.
-        filtered_gx = FILTER_COEFFICIENT * gx + (1 - FILTER_COEFFICIENT) * filtered_gx;
-        filtered_gy = FILTER_COEFFICIENT * gy + (1 - FILTER_COEFFICIENT) * filtered_gy;
-        filtered_gz = FILTER_COEFFICIENT * gz + (1 - FILTER_COEFFICIENT) * filtered_gz;
+        printf(">x_axis_raw:%d|g\n", raw_gx);
+        printf(">y_axis_raw:%d|g\n", raw_gy);
+        printf(">z_axis_raw:%d|g\n", raw_gz);
 
-        printf("Filtered|\tfiltered_gx: %4.5f \t filtered_gy: %4.5f \t filtered_gz: %4.5f\n", filtered_gx, filtered_gy, filtered_gz);
-        data_buf[count] = filtered_gz;
+        printf("Actual -> \t\tgx: %4.5f \t gy: %4.5f \t gz: %4.5f\t\n", gx, gy, gz);
+        data_buf[count] = raw_gz;
         count += 1;
     }
 
-    float totalRadians = 0;
+    int numSteps = 0;
+    int16_t lastValue = data_buf[0];
+
     for (int i = 0; i < 40; i += 1)
     {
-        totalRadians += data_buf[i];
+        if (abs(data_buf[i]) > THRESHOLD)
+        {
+            numSteps += 1;
+        }
+        lastValue = data_buf[i];
+        printf("Absolute value: %d\t Normal value: %d\n", abs(data_buf[i]), data_buf[i]);
     }
 
-    float linearVelocity = totalRadians * LEG_LENGTH;
+    float totalDistance = numSteps * LEG_LENGTH;
 
-    char buf[20];
+    char distance_str[20];
     char second_buf[20];
 
     lcd.Clear(LCD_COLOR_BLACK);
     lcd.SetTextColor(LCD_COLOR_RED);
     lcd.SetBackColor(LCD_COLOR_BLACK);
 
-    sprintf(buf, "%f", linearVelocity);
+    sprintf(distance_str, "%f", totalDistance);
 
     char str[] = " meters.";
-    strcat(buf, str);
+    strcat(distance_str, str);
+
+    float speed = totalDistance / 20.0f;
+    sprintf(second_buf, "%f", speed);
 
     lcd.DisplayStringAtLine(0, (uint8_t *)"Total Distance: ");
-    lcd.DisplayStringAtLine(1, (uint8_t *)buf);
+    lcd.DisplayStringAtLine(1, (uint8_t *)distance_str);
+    lcd.DisplayStringAtLine(2, (uint8_t *)"Speed (in m/s): ");
+    lcd.DisplayStringAtLine(3, (uint8_t *)second_buf);
 }

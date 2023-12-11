@@ -19,6 +19,7 @@ SPI spi(PF_9, PF_8, PF_7, PC_1, use_gpio_ssel);
 int8_t write_buf[32];
 int8_t read_buf[32];
 int16_t data_buf[40];
+float linear_distance[40];
 Ticker t;
 DigitalIn button(PA_0);
 EventFlags flags;
@@ -80,7 +81,7 @@ int main()
     int count = 0;
     int16_t raw_gx, raw_gy, raw_gz;
     float gx, gy, gz;
-    float filtered_gx, filtered_gy, filtered_gz = 0.0f;
+    // float filtered_gx, filtered_gy, filtered_gz = 0.0f;
     t.attach(&cb, 500ms);
     setupGyroscope();
 
@@ -110,25 +111,44 @@ int main()
         printf(">y_axis_raw:%d|g\n", raw_gy);
         printf(">z_axis_raw:%d|g\n", raw_gz);
 
+        gx = ((float)raw_gx) * SCALING_FACTOR;
+        gy = ((float)raw_gx) * SCALING_FACTOR;
+        gz = ((float)raw_gz) * SCALING_FACTOR;
+
         printf("Actual -> \t\tgx: %4.5f \t gy: %4.5f \t gz: %4.5f\t\n", gx, gy, gz);
+
+        // Calculate the linear distance
+        float angularDistanceX = 0.5 * gx;
+        float angularDistanceY = 0.5 * gy;
+        float angularDistanceZ = 0.5 * gz;
+
+        float linearDistanceX = angularDistanceX * LEG_LENGTH;
+        float linearDistanceY = angularDistanceY * LEG_LENGTH;
+        float linearDistanceZ = angularDistanceZ * LEG_LENGTH;
+
+        linear_distance[count] = sqrt((linearDistanceX * linearDistanceX) + (linearDistanceY * linearDistanceY) + (linearDistanceZ * linearDistanceZ));
+
         data_buf[count] = raw_gz;
         count += 1;
     }
 
-    int numSteps = 0;
-    int16_t lastValue = data_buf[0];
+    // int numSteps = 0;
+    // int16_t lastValue = data_buf[0];
+    float distance = 0.0f;
 
     for (int i = 0; i < 40; i += 1)
     {
-        if (abs(data_buf[i]) > THRESHOLD)
-        {
-            numSteps += 1;
-        }
-        lastValue = data_buf[i];
-        printf("Absolute value: %d\t Normal value: %d\n", abs(data_buf[i]), data_buf[i]);
+        // if (abs(data_buf[i]) > THRESHOLD)
+        // {
+        //     numSteps += 1;
+        // }
+        // lastValue = data_buf[i];
+        // printf("Absolute value: %d\t Normal value: %d\n", abs(data_buf[i]), data_buf[i]);
+
+        distance += linear_distance[i];
     }
 
-    float totalDistance = numSteps * LEG_LENGTH;
+    // float totalDistance = numSteps * LEG_LENGTH;
 
     char distance_str[20];
     char second_buf[20];
@@ -137,12 +157,12 @@ int main()
     lcd.SetTextColor(LCD_COLOR_RED);
     lcd.SetBackColor(LCD_COLOR_BLACK);
 
-    sprintf(distance_str, "%f", totalDistance);
+    sprintf(distance_str, "%f", distance);
 
     char str[] = " meters.";
     strcat(distance_str, str);
 
-    float speed = totalDistance / 20.0f;
+    float speed = distance / 20.0f;
     sprintf(second_buf, "%f", speed);
 
     lcd.DisplayStringAtLine(0, (uint8_t *)"Total Distance: ");

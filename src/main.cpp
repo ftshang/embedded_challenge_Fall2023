@@ -11,15 +11,13 @@
 #define CTRL_REG4_CONFIG 0b0'0'01'0'00'0
 #define SPI_FLAG 1
 #define SCALING_FACTOR (17.5f * 0.017453292519943295769236907684886f / 1000.0f);
-#define LEG_LENGTH (0.95)
-#define FILTER_COEFFICIENT 0.1f
-#define THRESHOLD (3750)
+#define RADIUS (0.4572)
 
 SPI spi(PF_9, PF_8, PF_7, PC_1, use_gpio_ssel);
 int8_t write_buf[32];
 int8_t read_buf[32];
 int16_t data_buf[40];
-float linear_distance[40];
+float angular_velocity[40];
 Ticker t;
 DigitalIn button(PA_0);
 EventFlags flags;
@@ -79,79 +77,68 @@ int main()
     }
 
     int count = 0;
-    int16_t raw_gx, raw_gy, raw_gz;
-    float gx, gy, gz;
-    // float filtered_gx, filtered_gy, filtered_gz = 0.0f;
+    int16_t raw_gz;
+    float gz;
     t.attach(&cb, 500ms);
     setupGyroscope();
-
-    lcd.Clear(LCD_COLOR_BLACK);
-    lcd.SetTextColor(LCD_COLOR_RED);
-    lcd.SetBackColor(LCD_COLOR_BLACK);
-    lcd.DisplayStringAtLine(0, (uint8_t *)"Begin walking now.");
-
-    printf("start\n");
+    int seconds = 20;
 
     while (1)
     {
         flags.wait_all(SPI_FLAG);
 
+        // Update LCD screen to notify of seconds remaining.
+        if (count % 2 == 0)
+        {
+            char seconds_str[20];
+            sprintf(seconds_str, "%d", seconds);
+            char seconds_remain[] = " seconds remaining.";
+            char second_remain[] = " second remaining.";
+            if (count != 38)
+            {
+                strcat(seconds_str, seconds_remain);
+            }
+            else
+            {
+                strcat(seconds_str, second_remain);
+            }
+            lcd.Clear(LCD_COLOR_BLACK);
+            lcd.SetTextColor(LCD_COLOR_RED);
+            lcd.SetBackColor(LCD_COLOR_BLACK);
+            lcd.DisplayStringAtLine(0, (uint8_t *)"Recording...");
+            lcd.DisplayStringAtLine(1, (uint8_t *)seconds_str);
+            seconds -= 1;
+        }
+
+        // Break out of recording data once 20 seconds have passed.
         if (count == 40)
         {
             break;
         }
+
         readData();
-        raw_gx = (((uint16_t)read_buf[2]) << 8) | ((uint16_t)read_buf[1]);
-        raw_gy = (((uint16_t)read_buf[4]) << 8) | ((uint16_t)read_buf[3]);
         raw_gz = (((uint16_t)read_buf[6]) << 8) | ((uint16_t)read_buf[5]);
-
-        printf("RAW|\tgx: %d \t gy: %d \t gz: %d\t\n", raw_gx, raw_gy, raw_gz);
-
-        printf(">x_axis_raw:%d|g\n", raw_gx);
-        printf(">y_axis_raw:%d|g\n", raw_gy);
-        printf(">z_axis_raw:%d|g\n", raw_gz);
-
-        gx = ((float)raw_gx) * SCALING_FACTOR;
-        gy = ((float)raw_gx) * SCALING_FACTOR;
         gz = ((float)raw_gz) * SCALING_FACTOR;
-
-        printf("Actual -> \t\tgx: %4.5f \t gy: %4.5f \t gz: %4.5f\t\n", gx, gy, gz);
-
-        // Calculate the linear distance
-        float angularDistanceX = 0.5 * gx;
-        float angularDistanceY = 0.5 * gy;
-        float angularDistanceZ = 0.5 * gz;
-
-        float linearDistanceX = angularDistanceX * LEG_LENGTH;
-        float linearDistanceY = angularDistanceY * LEG_LENGTH;
-        float linearDistanceZ = angularDistanceZ * LEG_LENGTH;
-
-        linear_distance[count] = sqrt((linearDistanceX * linearDistanceX) + (linearDistanceY * linearDistanceY) + (linearDistanceZ * linearDistanceZ));
-
         data_buf[count] = raw_gz;
+        angular_velocity[count] = gz;
         count += 1;
     }
 
-    // int numSteps = 0;
-    // int16_t lastValue = data_buf[0];
+    // Convert angular velocity into linear velocity.
     float distance = 0.0f;
-
     for (int i = 0; i < 40; i += 1)
     {
-        // if (abs(data_buf[i]) > THRESHOLD)
-        // {
-        //     numSteps += 1;
-        // }
-        // lastValue = data_buf[i];
-        // printf("Absolute value: %d\t Normal value: %d\n", abs(data_buf[i]), data_buf[i]);
-
-        distance += linear_distance[i];
+        if (abs(data_buf[i]) > 500)
+        {
+            float one_leg_distance = (0.5f) * (abs(angular_velocity[i]) * RADIUS);
+            // Account for the 2nd leg stride (the one without the sensor).
+            distance += (2.0f * one_leg_distance);
+        }
     }
 
-    // float totalDistance = numSteps * LEG_LENGTH;
-
+    // Print results to LCD screen.
     char distance_str[20];
-    char second_buf[20];
+    char speed_str[20];
 
     lcd.Clear(LCD_COLOR_BLACK);
     lcd.SetTextColor(LCD_COLOR_RED);
@@ -159,14 +146,17 @@ int main()
 
     sprintf(distance_str, "%f", distance);
 
-    char str[] = " meters.";
-    strcat(distance_str, str);
+    char meters_str[] = " meters";
+    strcat(distance_str, meters_str);
 
     float speed = distance / 20.0f;
-    sprintf(second_buf, "%f", speed);
+    sprintf(speed_str, "%f", speed);
+
+    char metersPerSecond[] = " meters/sec";
+    strcat(speed_str, metersPerSecond);
 
     lcd.DisplayStringAtLine(0, (uint8_t *)"Total Distance: ");
     lcd.DisplayStringAtLine(1, (uint8_t *)distance_str);
-    lcd.DisplayStringAtLine(2, (uint8_t *)"Speed (in m/s): ");
-    lcd.DisplayStringAtLine(3, (uint8_t *)second_buf);
+    lcd.DisplayStringAtLine(2, (uint8_t *)"Speed:");
+    lcd.DisplayStringAtLine(3, (uint8_t *)speed_str);
 }
